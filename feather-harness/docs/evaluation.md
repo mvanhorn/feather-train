@@ -72,8 +72,8 @@ Python environment and these packages in addition to the skills' instructions.
 | Harness context budget | 131,072 tokens |
 | Compaction trigger | 101,072 estimated tokens |
 | Recent turns retained | 2 |
-| Execution / compaction output ceilings | 131,072 / 65,536 tokens |
-| Turn limit | 1,000 |
+| Execution / compaction output ceilings | 131,072 / 131,072 tokens |
+| Turn limit | 500 |
 
 Compaction must be enabled explicitly in Harbor, the CLI, and `run_local`.
 `profile: prod` selects the production compaction prompt but does not enable the
@@ -104,10 +104,14 @@ the remaining context room. Those were dedicated serving deployments and the
 runs had different tasks, concurrency, and turn limits; there was no single
 identical job configuration for every evaluation.
 
-The public API example requests the historical 131,072-token execution ceiling
-and a 65,536-token compaction ceiling, starts at concurrency one, and uses a finite
-1,000-turn guard. It omits the historical provider-specific `top_k: 0` extension. It is a
-customer starting point, not a claim of exact reproduction of a historical score.
+The public API example keeps the shared base's 131,072-token execution and
+compaction ceilings and 500-turn limit. It starts at concurrency one and omits
+the historical provider-specific `top_k: 0` extension. The historical
+Terminal-Bench 4.0 run overrode the turn limit to unlimited; the shared base and
+SpreadsheetBench configuration used 500. The example uses the public API and a
+Docker smoke task rather than the historical dedicated endpoint and benchmark
+sandboxes, so it is not an exact reproduction of a historical score. Configured
+output allowances are also subject to the serving pool's enforced output ceiling.
 
 For a controlled comparison, keep task IDs, sandbox contents, package versions,
 prompts, sampling, compaction, output budgets, attempt counts, and scoring fixed.

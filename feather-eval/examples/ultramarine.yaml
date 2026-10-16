@@ -17,7 +17,7 @@ agents:
       profile: prod
       enable_image_tools: true
       enable_web_tools: false
-      max_turns: 1000
+      max_turns: 500
       model_settings:
         temperature: 1.0
         top_p: 0.95
@@ -32,7 +32,7 @@ agents:
         enabled: true
         context_window_tokens: 131072
         trigger_tokens: 101072
-        max_tokens: 65536
+        max_tokens: 131072
         min_turns_before_compaction: 0
         keep_recent_turns: 2
 tasks:
