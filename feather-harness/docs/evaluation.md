@@ -9,7 +9,7 @@ not a scored benchmark or a test of long-context compaction.
 
 ## Run on Harbor
 
-From the repository root, with Docker running and `OPENAI_API_KEY` set to your
+From the repository root, with Docker running and `PAPERINSTRUMENTS_API_KEY` set to your
 Paper API key:
 
 ```bash
@@ -17,6 +17,10 @@ uv sync --package feather-eval
 uv build --package feather-harness --wheel --out-dir dist
 uv run --package feather-eval harbor run --config feather-eval/examples/ultramarine.yaml
 ```
+
+The YAML maps `PAPERINSTRUMENTS_API_KEY`, matching the
+[API quickstart](https://docs.paperinstruments.com/docs/ultramarine), to the
+`OPENAI_API_KEY` environment variable consumed by the adapter inside the sandbox.
 
 Copy the YAML and replace `tasks` with your Harbor task paths, or use `datasets`
 for a dataset directory or registered dataset. Its paths
