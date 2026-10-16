@@ -36,7 +36,7 @@ def test_production_guidance_remains_utf8_with_a_windows_default_encoding(
         install_production_skills(workspace)
 
     for guide in (BUNDLE_ROOT / "production_skills").glob("*.md"):
-        guidance = guide.read_bytes().decode("utf-8").replace(".agents/", f"{skills_path}/")
+        guidance = guide.read_text(encoding="utf-8").replace(".agents/", f"{skills_path}/")
         if guide.name == "design.md":
             installed = root / guide.name
             expected = guidance.encode("utf-8")
