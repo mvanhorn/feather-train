@@ -72,7 +72,7 @@ Python environment and these packages in addition to the skills' instructions.
 | Harness context budget | 131,072 tokens |
 | Compaction trigger | 101,072 estimated tokens |
 | Recent turns retained | 2 |
-| Execution / compaction output ceilings | 65,536 / 65,536 tokens |
+| Execution / compaction output ceilings | 131,072 / 65,536 tokens |
 | Turn limit | 1,000 |
 
 Compaction must be enabled explicitly in Harbor, the CLI, and `run_local`.
@@ -104,8 +104,8 @@ the remaining context room. Those were dedicated serving deployments and the
 runs had different tasks, concurrency, and turn limits; there was no single
 identical job configuration for every evaluation.
 
-The public API example adapts that condition: it requests 65,536 output tokens
-for both execution and compaction, starts at concurrency one, and uses a finite
+The public API example requests the historical 131,072-token execution ceiling
+and a 65,536-token compaction ceiling, starts at concurrency one, and uses a finite
 1,000-turn guard. It omits the historical provider-specific `top_k: 0` extension. It is a
 customer starting point, not a claim of exact reproduction of a historical score.
 

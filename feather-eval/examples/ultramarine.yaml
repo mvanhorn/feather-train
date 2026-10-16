@@ -23,7 +23,7 @@ agents:
         top_p: 0.95
         reasoning_effort: max
         # Includes reasoning and answer/tool tokens.
-        max_tokens: 65536
+        max_tokens: 131072
       prompt_token_budget:
         processor_name: zai-org/GLM-5.3-Flash
         processor_revision: eb9eb208eb0d988989d07a6a12d0fdeb5f52574a
