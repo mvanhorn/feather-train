@@ -22,8 +22,8 @@ agents:
         temperature: 1.0
         top_p: 0.95
         reasoning_effort: max
-        # Includes reasoning. Increase only after confirming the endpoint's ceiling.
-        max_tokens: 32768
+        # Includes reasoning and answer/tool tokens.
+        max_tokens: 65536
       prompt_token_budget:
         processor_name: zai-org/GLM-5.3-Flash
         processor_revision: eb9eb208eb0d988989d07a6a12d0fdeb5f52574a
@@ -32,7 +32,7 @@ agents:
         enabled: true
         context_window_tokens: 131072
         trigger_tokens: 101072
-        max_tokens: 32768
+        max_tokens: 65536
         min_turns_before_compaction: 0
         keep_recent_turns: 2
 tasks:

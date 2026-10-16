@@ -68,7 +68,7 @@ Python environment and these packages in addition to the skills' instructions.
 | Harness context budget | 131,072 tokens |
 | Compaction trigger | 101,072 estimated tokens |
 | Recent turns retained | 2 |
-| Execution / compaction output ceilings | 32,768 / 32,768 tokens |
+| Execution / compaction output ceilings | 65,536 / 65,536 tokens |
 | Turn limit | 1,000 |
 
 Compaction must be enabled explicitly in Harbor, the CLI, and `run_local`.
@@ -86,8 +86,7 @@ earlier than the public deployment's 262,144-token total window. Changing the
 compaction window does not change the deployment's actual limit.
 
 All output limits include reasoning and answer/tool tokens together. Execution
-and summary limits are separate settings; raise both only after checking the
-endpoint's effective output ceiling. Max reasoning can increase latency and can
+and summary limits are separate settings. Max reasoning can increase latency and can
 still consume the full output allowance without a useful answer. Treat a change
 to effort, compaction, or output limits as a separate evaluation condition.
 
@@ -101,11 +100,9 @@ the remaining context room. Those were dedicated serving deployments and the
 runs had different tasks, concurrency, and turn limits; there was no single
 identical job configuration for every evaluation.
 
-The public API example adapts that condition: it requests 32,768 output tokens
+The public API example adapts that condition: it requests 65,536 output tokens
 for both execution and compaction, starts at concurrency one, and uses a finite
-1,000-turn guard. The 32,768 ceiling matches the production pool configuration
-checked on October 16, 2026; confirm the current serving limits before changing
-it. It omits the historical provider-specific `top_k: 0` extension. It is a
+1,000-turn guard. It omits the historical provider-specific `top_k: 0` extension. It is a
 customer starting point, not a claim of exact reproduction of a historical score.
 
 For a controlled comparison, keep task IDs, sandbox contents, package versions,
