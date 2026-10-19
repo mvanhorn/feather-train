@@ -36,13 +36,14 @@ This harness contains the prompts we've tuned for internal testing. Start with:
   [`production_compaction_prompt.md`](src/feather_harness/production_compaction_prompt.md).
 
 See [Default Sampling Config](https://docs.paperinstruments.com/docs/ultramarine/default-sampling-config)
-for sampling, reasoning effort, compaction, and output-budget guidance, and
+for sampling and reasoning effort, and
 [Prompting and packages](https://docs.paperinstruments.com/docs/ultramarine/prompting-and-packages)
 for the prompting overview and execution-environment setup.
 
-For Harbor evaluations, start with the [Ultramarine evaluation reference](docs/evaluation.md)
-and its runnable configuration. It makes compaction, sampling, image tools, and
-task-environment package requirements explicit.
+For compaction and output budgets, see the
+[Ultramarine evaluation reference](docs/evaluation.md#sampling-and-context).
+Its runnable [Harbor configuration](../feather-eval/examples/ultramarine.yaml)
+also makes sampling, image tools, and task-environment package requirements explicit.
 
 ## How it works
 
