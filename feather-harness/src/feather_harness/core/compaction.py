@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from pydantic import Field, model_validator
@@ -105,22 +106,27 @@ def check_compaction(
         unmeasured_messages = context
         measured_tokens = 0
 
+    # Provider usage replaces this provisional estimate on the next completed request.
+    estimated_tokens = measured_tokens + estimate_tokens(
+        message for message in unmeasured_messages if not isinstance(message, SystemMessage)
+    )
+    if estimated_tokens >= config.threshold_tokens:
+        return estimated_tokens
+    return None
+
+
+def estimate_tokens(messages: Iterable[Message]) -> int:
+    """Estimate prompt tokens at about three characters each."""
     characters = 0
     image_count = 0
-    for message in unmeasured_messages:
-        if isinstance(message, SystemMessage):
-            continue
+    for message in messages:
         value = message.model_dump(mode="json")
         if isinstance(message, ToolMessage) and isinstance(message.content, list):
             image_count += sum(part["type"] == "image_url" for part in message.content)
             value["content"] = [part for part in message.content if part["type"] == "text"]
         characters += len(json.dumps(value, ensure_ascii=False))
-    # Provider usage replaces this provisional estimate on the next completed request.
     # Base64 length is not a visual token count and would force repeated compactions.
-    estimated_tokens = measured_tokens + (characters + 2) // 3 + image_count * 8192
-    if estimated_tokens >= config.threshold_tokens:
-        return estimated_tokens
-    return None
+    return (characters + 2) // 3 + image_count * 8192
 
 
 def build_compaction_inputs(

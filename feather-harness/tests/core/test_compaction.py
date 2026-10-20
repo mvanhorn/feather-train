@@ -17,7 +17,14 @@ from feather_harness import (
     ToolResult,
     UserMessage,
 )
-from feather_harness.core.compaction import Accounting, build_compaction_inputs, check_compaction
+from feather_harness.core.compaction import (
+    DEFAULT_POLICY_COMPACTION_SYSTEM_PROMPT,
+    SUMMARY_RETURN_INSTRUCTION,
+    Accounting,
+    build_compaction_inputs,
+    check_compaction,
+    estimate_tokens,
+)
 
 from ..helpers import ScriptedModel, request, tool, work_message
 
@@ -154,54 +161,107 @@ async def test_each_compaction_has_its_own_three_retries():
     ]
 
 
-@pytest.mark.parametrize(
-    "compaction, tokens, room",
-    [
-        pytest.param(CompactionConfig(enabled=True), 101072, 30000, id="default-trigger"),
-        pytest.param(CompactionConfig(enabled=True), 120000, 11072, id="past-trigger"),
-        pytest.param(
-            CompactionConfig(enabled=True, max_tokens=131072), 120000, 11072, id="explicit-limit"
-        ),
-    ],
-)
-async def test_summary_request_fits_the_context_window(compaction, tokens, room):
+async def _compact_once(compaction, *, task="task", output="finished", tokens=10, model=None):
     async def invoke(raw):
-        return ToolResult(content="finished")
+        return ToolResult(content=output)
 
-    model = ScriptedModel(
-        work_message(), AssistantMessage(content="summary"), AssistantMessage(content="done"),
-        tokens=tokens - 3,
+    model = model or ScriptedModel(tokens=tokens)
+    model.messages = iter(
+        (work_message(), AssistantMessage(content="summary"), AssistantMessage(content="done"))
     )
-    await FeatherAgent(model=model, tools=(tool(invoke),), compaction=compaction).run(request())
+    result = await FeatherAgent(model=model, tools=(tool(invoke),), compaction=compaction).run(
+        RunRequest(messages=(UserMessage(content=task),))
+    )
+    assert [call.kind for call in model.calls] == ["agent", "compaction", "agent"]
+    return model.calls[1].settings.max_tokens, estimate_tokens(result.segments[1].input)
 
-    assert model.calls[1].kind == "compaction"
-    # The unmeasured tool result adds a few estimated tokens beyond the provider usage.
-    assert room - 50 < model.calls[1].settings.max_tokens < room
+
+@pytest.mark.parametrize("max_tokens", [None, 131072])
+async def test_summary_limit_leaves_room_for_the_summary_prompt(max_tokens):
+    limit = {} if max_tokens is None else {"max_tokens": max_tokens}
+    compaction = CompactionConfig(enabled=True, keep_recent_turns=0, **limit)
+    # Provider usage also counts the agent's system prompt and tools, which the summary omits.
+    summary_limit, prompt_tokens = await _compact_once(
+        compaction, task="x" * 303000, tokens=110000
+    )
+
+    assert 101000 < prompt_tokens < 110000
+    assert summary_limit == 131072 - prompt_tokens
 
 
-@pytest.mark.parametrize(
-    "compaction, tokens, expected",
-    [
-        pytest.param(
-            CompactionConfig(enabled=True, max_tokens=4096), 120000, 4096, id="limit-below-room"
-        ),
-        pytest.param(
-            CompactionConfig(enabled=True, context_window_tokens=40000), 120000, 65536,
-            id="estimate-past-window",
-        ),
-    ],
-)
-async def test_summary_limit_is_kept_when_clamping_cannot_help(compaction, tokens, expected):
+async def test_provider_usage_bounds_a_summary_prompt_the_estimate_overstates():
+    compaction = CompactionConfig(enabled=True, keep_recent_turns=0, min_turns_before_compaction=1)
+    summary_limit, prompt_tokens = await _compact_once(
+        compaction, task="x" * 330000, tokens=101100
+    )
+
+    triggering = 101100 + 3 + estimate_tokens([ToolMessage(tool_call_id="k", content="finished")])
+    added = estimate_tokens([
+        SystemMessage(content=DEFAULT_POLICY_COMPACTION_SYSTEM_PROMPT),
+        UserMessage(content=f"{compaction.prompt}\n\n{SUMMARY_RETURN_INSTRUCTION}"),
+    ])
+    assert prompt_tokens > triggering + added
+    assert summary_limit == 131072 - triggering - added
+
+
+async def test_summary_limit_is_kept_below_the_room_left():
+    compaction = CompactionConfig(enabled=True, keep_recent_turns=0, max_tokens=4096)
+    summary_limit, _ = await _compact_once(compaction, task="x" * 303000, tokens=110000)
+
+    assert summary_limit == 4096
+
+
+async def test_summary_prompt_larger_than_the_triggering_estimate_is_budgeted():
+    history = (
+        UserMessage(content="x" * 305000),
+        AssistantMessage(tool_calls=(ToolCall(id="old", name="work", arguments="{}"),)),
+        ToolMessage(tool_call_id="old", content="old result"),
+    )
+    model = ScriptedModel(AssistantMessage(content="summary"), AssistantMessage(content="done"))
+    compaction = CompactionConfig(enabled=True, keep_recent_turns=0)
+    result = await FeatherAgent(model=model, compaction=compaction).run(
+        RunRequest(messages=history)
+    )
+
+    # Before any provider usage, the trigger estimates the conversation alone; the summary
+    # request adds its system prompt and instruction to that same conversation.
+    triggering = estimate_tokens(history)
+    prompt_tokens = estimate_tokens(result.segments[1].input)
+    assert [call.kind for call in model.calls] == ["compaction", "agent"]
+    assert triggering >= compaction.threshold_tokens
+    assert prompt_tokens > triggering
+    assert model.calls[0].settings.max_tokens == 131072 - prompt_tokens
+
+
+async def test_summary_limit_uses_the_room_left_after_dropping_recent_turns():
+    # The latest tool output alone overflows the window, but it stays out of the summary.
+    compaction = CompactionConfig(enabled=True, keep_recent_turns=1, context_window_tokens=40000)
+    summary_limit, prompt_tokens = await _compact_once(compaction, output="x" * 150000)
+
+    assert prompt_tokens < 1000
+    assert summary_limit == 40000 - prompt_tokens
+
+
+async def test_summary_prompt_without_output_room_fails_before_the_request():
     async def invoke(raw):
-        return ToolResult(content="finished")
+        return ToolResult(content="x" * 150000)
 
-    model = ScriptedModel(
-        work_message(), AssistantMessage(content="summary"), AssistantMessage(content="done"),
-        tokens=tokens,
-    )
-    await FeatherAgent(model=model, tools=(tool(invoke),), compaction=compaction).run(request())
+    model = ScriptedModel(work_message(), AssistantMessage(content="summary"))
+    compaction = CompactionConfig(enabled=True, keep_recent_turns=0, context_window_tokens=40000)
+    with pytest.raises(AgentRunError, match="no output room remains") as raised:
+        await FeatherAgent(model=model, tools=(tool(invoke),), compaction=compaction).run(request())
 
-    assert model.calls[1].settings.max_tokens == expected
+    assert [call.kind for call in model.calls] == ["agent"]
+    assert raised.value.result.compactions == 0
+
+
+async def test_exact_prompt_token_budget_sets_the_summary_limit_in_the_model():
+    model = ScriptedModel()
+    model.prompt_token_budget = object()
+    compaction = CompactionConfig(enabled=True, keep_recent_turns=0, context_window_tokens=40000)
+    summary_limit, _ = await _compact_once(compaction, output="x" * 150000, model=model)
+
+    assert summary_limit == 65536
 
 
 @pytest.mark.parametrize("summary_limit", [None, 131072])
@@ -413,7 +473,7 @@ async def test_supplied_history_does_not_get_live_state_labeled_as_historical():
     ).run(
         RunRequest(
             messages=(
-                UserMessage(content="x" * 400000),
+                UserMessage(content="x" * 320000),
                 AssistantMessage(tool_calls=(ToolCall(id="old", name="work", arguments="{}"),)),
                 ToolMessage(tool_call_id="old", content="old result"),
             )
