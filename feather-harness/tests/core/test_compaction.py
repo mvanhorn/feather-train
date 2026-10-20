@@ -118,8 +118,9 @@ async def test_summary_retries_preserve_context_settings_and_completed_tool_work
     assert completed == ["{}"]
     assert len(transcripts) == 1
     assert all(call.request == model.calls[1].request for call in model.calls[1:4])
+    summary_limit = model.calls[1].settings.max_tokens
     assert all(
-        call.settings == settings.model_copy(update={"max_tokens": 65536})
+        call.settings == settings.model_copy(update={"max_tokens": summary_limit})
         for call in model.calls[1:4]
     )
     assert f"completed={1 - keep_recent_turns}" in result.segments[-1].input[1].content
@@ -153,6 +154,56 @@ async def test_each_compaction_has_its_own_three_retries():
     ]
 
 
+@pytest.mark.parametrize(
+    "compaction, tokens, room",
+    [
+        pytest.param(CompactionConfig(enabled=True), 101072, 30000, id="default-trigger"),
+        pytest.param(CompactionConfig(enabled=True), 120000, 11072, id="past-trigger"),
+        pytest.param(
+            CompactionConfig(enabled=True, max_tokens=131072), 120000, 11072, id="explicit-limit"
+        ),
+    ],
+)
+async def test_summary_request_fits_the_context_window(compaction, tokens, room):
+    async def invoke(raw):
+        return ToolResult(content="finished")
+
+    model = ScriptedModel(
+        work_message(), AssistantMessage(content="summary"), AssistantMessage(content="done"),
+        tokens=tokens - 3,
+    )
+    await FeatherAgent(model=model, tools=(tool(invoke),), compaction=compaction).run(request())
+
+    assert model.calls[1].kind == "compaction"
+    # The unmeasured tool result adds a few estimated tokens beyond the provider usage.
+    assert room - 50 < model.calls[1].settings.max_tokens < room
+
+
+@pytest.mark.parametrize(
+    "compaction, tokens, expected",
+    [
+        pytest.param(
+            CompactionConfig(enabled=True, max_tokens=4096), 120000, 4096, id="limit-below-room"
+        ),
+        pytest.param(
+            CompactionConfig(enabled=True, context_window_tokens=40000), 120000, 65536,
+            id="estimate-past-window",
+        ),
+    ],
+)
+async def test_summary_limit_is_kept_when_clamping_cannot_help(compaction, tokens, expected):
+    async def invoke(raw):
+        return ToolResult(content="finished")
+
+    model = ScriptedModel(
+        work_message(), AssistantMessage(content="summary"), AssistantMessage(content="done"),
+        tokens=tokens,
+    )
+    await FeatherAgent(model=model, tools=(tool(invoke),), compaction=compaction).run(request())
+
+    assert model.calls[1].settings.max_tokens == expected
+
+
 @pytest.mark.parametrize("summary_limit", [None, 131072])
 async def test_compaction_preserves_sampling_and_provider_routing(summary_limit):
     async def invoke(raw):
@@ -168,10 +219,12 @@ async def test_compaction_preserves_sampling_and_provider_routing(summary_limit)
     model = ScriptedModel(
         work_message(), AssistantMessage(content="summary"), AssistantMessage(content="done"), tokens=120000
     )
+    # A window with room for the whole summary limit, so only sampling settings are at issue.
+    window = {"context_window_tokens": 400000, "trigger_tokens": 100000}
     compaction = (
-        CompactionConfig(enabled=True)
+        CompactionConfig(enabled=True, **window)
         if summary_limit is None
-        else CompactionConfig(enabled=True, max_tokens=summary_limit)
+        else CompactionConfig(enabled=True, max_tokens=summary_limit, **window)
     )
     await FeatherAgent(
         model=model, tools=(tool(invoke),), compaction=compaction

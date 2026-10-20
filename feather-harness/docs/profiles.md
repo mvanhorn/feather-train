@@ -147,8 +147,10 @@ Compaction retains the original task, recent history, and todo handling. Optiona
 `exclude_unreplayed_reasoning` subtracts reasoning that the model will not see again
 from the context estimate.
 Its `max_tokens` summary ceiling defaults to 65,536 and can be configured independently
-of the agent ceiling. Summaries inherit the agent's other sampling and provider settings;
-a configured GLM token budget clamps output to remaining context room.
+of the agent ceiling. Each summary request is clamped to the room the context estimate
+leaves in `context_window_tokens` (about 30,000 at the default trigger). Summaries inherit
+the agent's other sampling and provider settings; a configured GLM token budget clamps
+output to the exact remaining context room.
 No approval/UI framework, sandbox provisioning,
 external vision reviewer, application event framework, or tool-mutation retry is added.
 Local commands retain the host's permissions; a profile is not a security boundary.

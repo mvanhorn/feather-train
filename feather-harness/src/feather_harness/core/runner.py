@@ -231,12 +231,21 @@ class FeatherAgent:
                         SystemMessage(content=DEFAULT_POLICY_COMPACTION_SYSTEM_PROMPT),
                         *summary_input,
                     ]
+                    # Endpoints that enforce prompt + max_tokens <= window reject a summary
+                    # limit larger than the room left. The context estimate also counts the
+                    # agent's system prompt and tools, which the summary request omits, so it
+                    # overstates the summary prompt. Past the window, the summary input (which
+                    # drops recent turns) may still fit, so the configured limit stays.
+                    summary_max_tokens = self.compaction.max_tokens
+                    window_room = self.compaction.context_window_tokens - compaction_tokens
+                    if window_room > 0:
+                        summary_max_tokens = min(summary_max_tokens, window_room)
                     for attempt in range(1, _COMPACTION_MAX_ATTEMPTS + 1):
                         state.start_segment("compaction", list(compaction_input))
                         summary_call = await self.model.complete(
                             state.context,
                             settings=request.model_settings.model_copy(
-                                update={"max_tokens": self.compaction.max_tokens}
+                                update={"max_tokens": summary_max_tokens}
                             ),
                             kind="compaction",
                         )
