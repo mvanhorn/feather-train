@@ -32,7 +32,9 @@ SUMMARY_RETURN_INSTRUCTION = "Return only the compact continuation summary."
 
 
 class CompactionConfig(FrozenModel):
-    enabled: bool = False
+    # Leave unset to use the profile default (on for prod, off elsewhere).
+    # Set True or False to force compaction on or off in any profile.
+    enabled: bool | None = None
     max_tokens: int = Field(default=65536, gt=0)
     context_window_tokens: int = Field(default=131072, gt=30000)
     min_turns_before_compaction: int = Field(default=0, ge=0)
