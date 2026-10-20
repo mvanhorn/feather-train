@@ -234,7 +234,7 @@ class FeatherAgent:
                     ]
                     summary_max_tokens = self.compaction.max_tokens
                     # An exact prompt token budget clamps the summary limit in the model.
-                    if getattr(self.model, "prompt_token_budget", None) is None:
+                    if self.model.prompt_token_budget is None:
                         # Endpoints that enforce prompt + max_tokens <= window reject a
                         # limit larger than the room the summary prompt leaves. Its history
                         # was part of the estimated context, so that estimate plus the added
