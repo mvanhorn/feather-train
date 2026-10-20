@@ -59,6 +59,7 @@ RECOVERY_FEEDBACK = {
 }
 # Finish reasons that mean the provider stopped the response before it was complete.
 _INTERRUPTED_FINISHES = frozenset({"length", "error", "content_filter"})
+_COMPACTION_MAX_ATTEMPTS = 4
 
 
 class RunRequest(FrozenModel):
@@ -206,28 +207,39 @@ class FeatherAgent:
                         elif recent_turns <= len(turn_tool_states):
                             tool_state = turn_tool_states[-recent_turns]
                         # Supplied history has no pre-turn snapshots; never substitute live state.
-                    state.start_segment(
-                        "compaction",
-                        [
-                            SystemMessage(content=DEFAULT_POLICY_COMPACTION_SYSTEM_PROMPT),
-                            *summary_input,
-                        ],
-                    )
-                    summary_call = await self.model.complete(
-                        state.context,
-                        settings=request.model_settings.model_copy(update={"max_tokens": 65536}),
-                        kind="compaction",
-                    )
-                    state.context.append(summary_call.assistant)
-                    if self.response_recovery and (
-                        summary_call.finish_reason in _INTERRUPTED_FINISHES
-                        or summary_call.assistant.refusal
-                    ):
-                        raise ValueError(
-                            "compaction summary is incomplete "
-                            f"(finish_reason={summary_call.finish_reason})"
+                    compaction_input = [
+                        SystemMessage(content=DEFAULT_POLICY_COMPACTION_SYSTEM_PROMPT),
+                        *summary_input,
+                    ]
+                    for attempt in range(1, _COMPACTION_MAX_ATTEMPTS + 1):
+                        state.start_segment("compaction", list(compaction_input))
+                        summary_call = await self.model.complete(
+                            state.context,
+                            settings=request.model_settings.model_copy(
+                                update={"max_tokens": 65536}
+                            ),
+                            kind="compaction",
                         )
-                    summary = build_summary(summary_call.assistant.content, tool_state)
+                        state.context.append(summary_call.assistant)
+                        if self.response_recovery and (
+                            summary_call.finish_reason in _INTERRUPTED_FINISHES
+                            or summary_call.assistant.refusal
+                        ):
+                            raise ValueError(
+                                "compaction summary is incomplete "
+                                f"(finish_reason={summary_call.finish_reason})"
+                            )
+                        try:
+                            summary = build_summary(summary_call.assistant.content, tool_state)
+                            break
+                        except ValueError:
+                            if attempt == _COMPACTION_MAX_ATTEMPTS:
+                                raise
+                            logger.warning(
+                                "Compaction summary was empty (attempt %d/%d); retrying",
+                                attempt,
+                                _COMPACTION_MAX_ATTEMPTS,
+                            )
                     context = [*system_messages, *prefix, summary, *recent]
                 except Exception as exc:
                     raise AgentRunError(

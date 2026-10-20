@@ -70,7 +70,7 @@ async def test_empty_summary_fails_without_losing_completed_tool_work():
     async def invoke(raw):
         return ToolResult(content="finished")
 
-    model = ScriptedModel(work_message(), AssistantMessage(content=""), tokens=120000)
+    model = ScriptedModel(work_message(), *[AssistantMessage(content="")] * 4, tokens=120000)
     with pytest.raises(AgentRunError, match="summary was empty") as raised:
         await FeatherAgent(
             model=model, tools=(tool(invoke),), compaction=CompactionConfig(enabled=True)
@@ -79,8 +79,34 @@ async def test_empty_summary_fails_without_losing_completed_tool_work():
     assert result.num_turns == 1
     assert result.compactions == 0
     assert result.execution_messages()[-1] == ToolMessage(tool_call_id="k", content="finished")
-    assert [segment.kind for segment in result.segments] == ["execution", "compaction"]
+    assert [segment.kind for segment in result.segments] == ["execution", *["compaction"] * 4]
     assert result.segments[-1].messages == (AssistantMessage(content=""),)
+    assert len(model.calls) == 5
+
+
+async def test_reasoning_only_summary_retries_original_input_before_continuing():
+    async def invoke(raw):
+        return ToolResult(content="finished")
+
+    model = ScriptedModel(
+        work_message(),
+        AssistantMessage(content=None, reasoning_content="Summary planning only."),
+        AssistantMessage(content="Preserve the completed work."),
+        AssistantMessage(content="Done."),
+        tokens=120000,
+    )
+    result = await FeatherAgent(
+        model=model,
+        tools=(tool(invoke),),
+        compaction=CompactionConfig(enabled=True),
+        response_recovery=True,
+    ).run(request())
+    assert result.final_answer == "Done."
+    assert result.compactions == 1
+    assert [call.kind for call in model.calls] == ["agent", "compaction", "compaction", "agent"]
+    assert model.calls[1].request == model.calls[2].request
+    assert "Preserve the completed work." in json.dumps(model.calls[-1].request)
+    assert "Summary planning only." not in json.dumps(model.calls[-1].request)
 
 
 async def test_compaction_preserves_sampling_and_provider_routing():
@@ -94,7 +120,10 @@ async def test_compaction_preserves_sampling_and_provider_routing():
         extra_body={"provider": {"only": ["baseten"]}},
     )
     model = ScriptedModel(
-        work_message(), AssistantMessage(content="summary"), AssistantMessage(content="done"), tokens=120000
+        work_message(),
+        AssistantMessage(content="summary"),
+        AssistantMessage(content="done"),
+        tokens=120000,
     )
     await FeatherAgent(
         model=model, tools=(tool(invoke),), compaction=CompactionConfig(enabled=True)
