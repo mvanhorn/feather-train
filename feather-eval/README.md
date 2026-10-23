@@ -166,7 +166,7 @@ uv run --package feather-eval feather-atif run.json --output-dir atif --session-
 ```
 
 To print stop reason, usage, and tool-call counts from that same `run.json` without
-converting it, use `feather --inspect run.json`.
+converting it, use `uv run --package feather-eval feather --inspect run.json`.
 
 Add `--grader` for a single chronological transcript.
 

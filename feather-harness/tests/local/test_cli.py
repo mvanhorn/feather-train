@@ -417,8 +417,10 @@ def test_cli_discovers_and_executes_stdio_mcp_tools(tmp_path):
 def _inspect_run_result() -> RunResult:
     return RunResult(
         stop_reason="completed",
+        stop_message="recovered from a truncated response",
         num_turns=2,
         compactions=1,
+        recoveries=1,
         final_answer="Submitted workbook",
         segments=(
             TraceSegment(
@@ -438,6 +440,7 @@ def _inspect_run_result() -> RunResult:
                 calls=(
                     ProviderUsage(
                         kind="agent",
+                        provider="openai",
                         usage={"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14},
                     ),
                 ),
@@ -449,6 +452,7 @@ def _inspect_run_result() -> RunResult:
                 calls=(
                     ProviderUsage(
                         kind="compaction",
+                        provider="openai",
                         usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
                     ),
                 ),
@@ -457,6 +461,7 @@ def _inspect_run_result() -> RunResult:
                 kind="execution",
                 input=(UserMessage(content="summary"),),
                 messages=(AssistantMessage(content="Submitted workbook"),),
+                calls=(ProviderUsage(kind="agent"),),
             ),
         ),
     )
@@ -476,15 +481,24 @@ def test_cli_inspect_summarizes_saved_run_without_workspace_setup(tmp_path, wrap
     trace.write_text(json.dumps(payload), encoding="utf-8")
     completed = cli(tmp_path, "--inspect", str(trace))
     assert completed.returncode == 0, completed.stderr
-    summary = json.loads(completed.stdout)
-    assert summary["stop_reason"] == "completed"
-    assert summary["num_turns"] == 2
-    assert summary["compactions"] == 1
-    assert summary["final_answer"] == "Submitted workbook"
-    assert summary["tools"] == {"bash": 1, "read": 1}
-    assert summary["usage"]["model_calls"] == 2
-    assert summary["usage"]["prompt_tokens"] == 15
-    assert summary["usage"]["completion_tokens"] == 6
+    assert json.loads(completed.stdout) == {
+        "schema_version": "feather.run.v1",
+        "stop_reason": "completed",
+        "stop_message": "recovered from a truncated response",
+        "num_turns": 2,
+        "compactions": 1,
+        "recoveries": 1,
+        "final_answer": "Submitted workbook",
+        "usage": {
+            "model_calls": 3,
+            "calls_without_usage": 1,
+            "prompt_tokens": 15,
+            "completion_tokens": 6,
+            "byok_calls": 0,
+            "providers": ["openai"],
+        },
+        "tools": {"bash": 1, "read": 1},
+    }
     assert not (tmp_path / ".agents").exists()
 
 
