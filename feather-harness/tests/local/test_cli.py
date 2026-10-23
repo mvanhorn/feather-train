@@ -250,6 +250,7 @@ def test_cli_returns_partial_json_after_exhausting_request_retries(tmp_path):
     result = json.loads(completed.stdout)
     assert result["stop_reason"] == "failed"
     assert result["segments"][-1]["input"][-1]["content"] == "Do the task"
+    assert json.loads((tmp_path / ".feather" / "run.json").read_text(encoding="utf-8")) == result
     assert len(requests) == 3
     assert requests[0] == requests[1] == requests[2]
 
@@ -261,6 +262,30 @@ def test_cli_rejects_invalid_config_before_workspace_setup(tmp_path):
     assert completed.returncode == 1
     assert "unknown_option" in completed.stderr
     assert not (tmp_path / ".agents").exists()
+    assert not (tmp_path / ".feather" / "run.json").exists()
+
+
+def test_cli_writes_run_json_under_feather_and_output_path(tmp_path):
+    with model_server([(200, response("Done."))]) as (url, _):
+        output = tmp_path / "reports" / "result.json"
+        completed = cli(
+            tmp_path,
+            "--model",
+            "test",
+            "--base-url",
+            url,
+            "--profile",
+            "train",
+            "--output",
+            str(output),
+            "Do the task",
+        )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["final_answer"] == "Done."
+    saved = json.loads((tmp_path / ".feather" / "run.json").read_text(encoding="utf-8"))
+    copied = json.loads(output.read_text(encoding="utf-8"))
+    assert saved == result == copied
 
 
 def test_cli_web_tools_require_exa_key_before_workspace_setup(tmp_path, monkeypatch):
