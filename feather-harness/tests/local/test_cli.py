@@ -14,7 +14,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from openai import AsyncOpenAI
 
-from feather_harness import ChatCompletionsModel, CompactionConfig, run_local
+from feather_harness import (
+    AssistantMessage,
+    ChatCompletionsModel,
+    CompactionConfig,
+    ProviderUsage,
+    RunResult,
+    ToolCall,
+    ToolMessage,
+    TraceSegment,
+    UserMessage,
+    run_local,
+)
 from feather_harness.prompt import SKILLS_ROOT, build_instructions
 
 
@@ -401,3 +412,95 @@ def test_cli_discovers_and_executes_stdio_mcp_tools(tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["final_answer"] == "Done."
     assert requests[0][1]["tools"][0]["function"]["name"] == "mcp__mail__echo"
+
+
+def _inspect_run_result() -> RunResult:
+    return RunResult(
+        stop_reason="completed",
+        num_turns=2,
+        compactions=1,
+        final_answer="Submitted workbook",
+        segments=(
+            TraceSegment(
+                kind="execution",
+                input=(UserMessage(content="task"),),
+                messages=(
+                    AssistantMessage(
+                        tool_calls=(
+                            ToolCall(id="a", name="read", arguments='{"file_path":"a"}'),
+                            ToolCall(id="b", name="bash", arguments='{"command":"true"}'),
+                        )
+                    ),
+                    ToolMessage(tool_call_id="a", content="A"),
+                    ToolMessage(tool_call_id="b", content="ok"),
+                    AssistantMessage(content="Before compaction"),
+                ),
+                calls=(
+                    ProviderUsage(
+                        kind="agent",
+                        usage={"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14},
+                    ),
+                ),
+            ),
+            TraceSegment(
+                kind="compaction",
+                input=(UserMessage(content="Summarize"),),
+                messages=(AssistantMessage(content="summary"),),
+                calls=(
+                    ProviderUsage(
+                        kind="compaction",
+                        usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+                    ),
+                ),
+            ),
+            TraceSegment(
+                kind="execution",
+                input=(UserMessage(content="summary"),),
+                messages=(AssistantMessage(content="Submitted workbook"),),
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("wrapped", [False, True], ids=["run-v1", "train-evidence"])
+def test_cli_inspect_summarizes_saved_run_without_workspace_setup(tmp_path, wrapped):
+    payload = _inspect_run_result().model_dump(mode="json")
+    if wrapped:
+        payload = {
+            "schema_version": "tldc.feather-agent-trace.v2",
+            "agent": {"name": "feather", "model": "test"},
+            "task_id": "task-id",
+            "trace": payload,
+        }
+    trace = tmp_path / "run.json"
+    trace.write_text(json.dumps(payload), encoding="utf-8")
+    completed = cli(tmp_path, "--inspect", str(trace))
+    assert completed.returncode == 0, completed.stderr
+    summary = json.loads(completed.stdout)
+    assert summary["stop_reason"] == "completed"
+    assert summary["num_turns"] == 2
+    assert summary["compactions"] == 1
+    assert summary["final_answer"] == "Submitted workbook"
+    assert summary["tools"] == {"bash": 1, "read": 1}
+    assert summary["usage"]["model_calls"] == 2
+    assert summary["usage"]["prompt_tokens"] == 15
+    assert summary["usage"]["completion_tokens"] == 6
+    assert not (tmp_path / ".agents").exists()
+
+
+def test_cli_inspect_rejects_unknown_schema_without_workspace_setup(tmp_path):
+    trace = tmp_path / "run.json"
+    trace.write_text(json.dumps({"schema_version": "nope"}), encoding="utf-8")
+    completed = cli(tmp_path, "--inspect", str(trace))
+    assert completed.returncode == 1
+    assert "Expected feather.run.v1" in completed.stderr
+    assert not (tmp_path / ".agents").exists()
+
+
+def test_cli_inspect_rejects_a_prompt(tmp_path):
+    trace = tmp_path / "run.json"
+    trace.write_text("{}", encoding="utf-8")
+    completed = cli(tmp_path, "--inspect", str(trace), "Do the task")
+    assert completed.returncode == 2
+    assert "--inspect does not take a prompt" in completed.stderr
+    assert not (tmp_path / ".agents").exists()
