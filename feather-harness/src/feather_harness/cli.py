@@ -53,6 +53,8 @@ class LocalConfig(FrozenModel):
 
 
 async def run(config: LocalConfig, prompt: str, *, output: Path | None = None) -> int:
+    if output is not None:
+        _require_writable_output(output)
     web_provider = (
         ExaWebProvider(api_key=os.environ.get("EXA_API_KEY", ""))
         if config.enable_web_tools
@@ -86,22 +88,39 @@ async def run(config: LocalConfig, prompt: str, *, output: Path | None = None) -
             )
         except AgentRunError as exc:
             # Preserve the loop's partial transcript when a model or tool fails.
-            _write_run_result(exc.result, workspace=config.workspace, output=output)
             logger.error("%s", exc)
+            _write_run_result(exc.result, workspace=config.workspace, output=output)
             return 1
     _write_run_result(result, workspace=config.workspace, output=output)
     return 0 if result.stop_reason == "completed" else 1
 
 
+def _require_writable_output(path: Path) -> None:
+    existed = path.exists()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8"):
+        pass
+    if not existed:
+        path.unlink(missing_ok=True)
+
+
 def _write_run_result(result: RunResult, *, workspace: Path, output: Path | None) -> None:
     payload = result.model_dump_json() + "\n"
-    sys.stdout.write(payload)
+    # Persist copies first so a broken stdout pipe cannot drop the run files.
     try:
         save_transcript(Path(os.path.abspath(workspace)) / ".feather" / "run.json", payload)
     except OSError:
         logger.warning("Could not save the run result under .feather/run.json", exc_info=True)
     if output is not None:
-        save_transcript(output, payload)
+        try:
+            save_transcript(output, payload)
+        except OSError:
+            logger.warning("Could not write the run result to --output", exc_info=True)
+    try:
+        sys.stdout.write(payload)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        pass
 
 
 def main() -> int:
