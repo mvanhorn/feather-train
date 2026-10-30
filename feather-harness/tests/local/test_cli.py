@@ -17,7 +17,7 @@ import pytest
 from openai import AsyncOpenAI
 
 from feather_harness import ChatCompletionsModel, CompactionConfig, run_local
-from feather_harness.cli import LocalConfig, run
+from feather_harness.cli import LocalConfig, _require_writable_output, run
 from feather_harness.core.runner import AgentRunError, RunResult
 from feather_harness.prompt import SKILLS_ROOT, build_instructions
 
@@ -329,7 +329,10 @@ def test_cli_resolves_relative_output_from_launch_directory(tmp_path):
     assert not (workspace / "reports" / "result.json").exists()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="CLI release target is Linux")
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="CLI release target is Linux; root bypasses chmod",
+)
 def test_cli_rejects_unwritable_output_before_run(tmp_path):
     locked = tmp_path / "locked"
     locked.mkdir()
@@ -355,6 +358,46 @@ def test_cli_rejects_unwritable_output_before_run(tmp_path):
     assert not (tmp_path / ".agents").exists()
     assert not (tmp_path / ".feather" / "run.json").exists()
     assert requests == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="CLI release target is Linux")
+def test_output_preflight_leaves_dangling_symlink_alone(tmp_path):
+    target = tmp_path / "missing" / "result.json"
+    link = tmp_path / "result.json"
+    link.symlink_to(target)
+    _require_writable_output(link)
+    assert link.is_symlink()
+    assert not target.exists()
+    assert not target.parent.exists()
+
+
+def test_output_preflight_does_not_create_missing_directories(tmp_path):
+    output = tmp_path / "missing-workdir" / "reports" / "result.json"
+    _require_writable_output(output)
+    assert not (tmp_path / "missing-workdir").exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="CLI release target is Linux; root bypasses chmod",
+)
+def test_output_preflight_matches_replace_semantics(tmp_path):
+    read_only = tmp_path / "result.json"
+    read_only.write_text("old", encoding="utf-8")
+    read_only.chmod(0o444)
+    _require_writable_output(read_only)
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    writable = locked / "result.json"
+    writable.write_text("old", encoding="utf-8")
+    locked.chmod(0o555)
+    try:
+        with pytest.raises(PermissionError):
+            _require_writable_output(writable)
+    finally:
+        locked.chmod(0o755)
+    assert sorted(path.name for path in locked.iterdir()) == ["result.json"]
 
 
 async def test_cli_keeps_failed_run_when_output_write_fails(tmp_path, monkeypatch, caplog, capsys):

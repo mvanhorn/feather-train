@@ -2,10 +2,12 @@
 
 import argparse
 import asyncio
+import errno
 import json
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -96,12 +98,24 @@ async def run(config: LocalConfig, prompt: str, *, output: Path | None = None) -
 
 
 def _require_writable_output(path: Path) -> None:
-    existed = path.exists()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8"):
-        pass
-    if not existed:
-        path.unlink(missing_ok=True)
+    # save_transcript creates missing parents, writes a sibling temp file, then
+    # replaces the destination, so probe that directory without touching the
+    # destination itself or creating anything before the workspace is validated.
+    if path.is_dir():
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(path))
+    directory = path.parent
+    if directory.is_dir():
+        descriptor, probe = tempfile.mkstemp(dir=directory, prefix=".feather-output-")
+        os.close(descriptor)
+        os.unlink(probe)
+        return
+    ancestor = directory
+    while not ancestor.exists() and ancestor != ancestor.parent:
+        ancestor = ancestor.parent
+    if not ancestor.is_dir():
+        raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(ancestor))
+    if not os.access(ancestor, os.W_OK | os.X_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(ancestor))
 
 
 def _write_run_result(result: RunResult, *, workspace: Path, output: Path | None) -> None:
