@@ -110,7 +110,8 @@ def _require_writable_output(path: Path) -> None:
         os.unlink(probe)
         return
     ancestor = directory
-    while not ancestor.exists() and ancestor != ancestor.parent:
+    # lexists stops at a dangling symlink, which mkdir cannot create through.
+    while not os.path.lexists(ancestor) and ancestor != ancestor.parent:
         ancestor = ancestor.parent
     if not ancestor.is_dir():
         raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(ancestor))

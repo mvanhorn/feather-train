@@ -371,6 +371,16 @@ def test_output_preflight_leaves_dangling_symlink_alone(tmp_path):
     assert not target.parent.exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="CLI release target is Linux")
+def test_output_preflight_rejects_dangling_parent_symlink(tmp_path):
+    parent = tmp_path / "reports"
+    parent.symlink_to(tmp_path / "missing")
+    for output in (parent / "result.json", parent / "nested" / "result.json"):
+        with pytest.raises(NotADirectoryError):
+            _require_writable_output(output)
+    assert not (tmp_path / "missing").exists()
+
+
 def test_output_preflight_does_not_create_missing_directories(tmp_path):
     output = tmp_path / "missing-workdir" / "reports" / "result.json"
     _require_writable_output(output)
